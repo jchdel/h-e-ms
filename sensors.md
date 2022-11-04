@@ -1,22 +1,24 @@
 # Deployed
 
-- AC home
-- CT home 
-- CT furnace
-- CT engine
-- temperature x12
-- humidity x6
-- weather
-- inverter
+- AC home - EmonHub
+- CT home - EmonHub
+- CT furnace - EmonHub
+- CT engine - EmonHub
+- temperature x12 - EmonHub
+- humidity x6 - EmonHub
+- weather - weewx
+- inverter - mpp-solar
+- WiFi relay - EmonHub
+- temperature - 1wire
 
 # Planned
 
-- soil moisture x4
-- soil temperature x4
+- soil moisture x4 - weewx
+- soil temperature x4 - weewx
 
 # Ordered
 
-- smart plug x2
+- smart plug x2 - zigbee2mqtt
 
 # Wish list
 
