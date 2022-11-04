@@ -4,7 +4,7 @@ see https://alpinelinux.org/
 
 ## setup a dev box
 
-TBD
+I run it as a KVM running with qemu on a Debian stable box. It is an Alpine Linux setup as https://wiki.alpinelinux.org/wiki/Include:Setup_your_system_and_account_for_building_packages
 
 ## select wanted packages
 
