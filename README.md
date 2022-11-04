@@ -65,9 +65,9 @@ what is whished:
 
 # Home Automation - Domotique
 
-As a matter of fact, We currently have only a single relay to pilotIt is used to drive the central heating sytem. This is done via a linux cron job that periodically reads some values from the timeserie database, compute some decision tree and publish an on/off value to MQTT. The autonomous Wi-Fi relay subscribe to that MQTT topic and acts accordingly meanwhile reporting its state and other measurements to the remote MQTT broker.
+As a matter of fact, We currently have only a single relay to pilot. It is used to drive the central heating sytem. This is done via a linux cron job that periodically reads some values from the timeserie database, compute some decision tree and publish an on/off value to MQTT. The autonomous Wi-Fi relay subscribe to that MQTT topic and acts accordingly meanwhile reporting its state and other measurements to the remote MQTT broker.
 
 I plan to drive the new infrared heater panels with a similar approach, not relying to any third party home automation software. \
 The only usage I forsee so far for such home automation package is ease to acces to some predefined dashboards. I do not think this is enough to deploy such solution(s)...
 
-I would love to add sensors and actuators but lack usefull ideas (or hardware) where automation makes sense!
+I would love to add sensors and actuators but lack usefull ideas (or hardware) where automation makes sense for the rented home I live!
