@@ -1,0 +1,62 @@
+#!/bin/sh
+
+_GET(){
+	curl -s \
+		-H "Authorization: Bearer ********" \
+		http://localhost/feed/value.json?id=$1
+}
+
+_FETCH(){
+	curl -s -H "Authorization: Bearer ********" "http://localhost/feed/data.json?id=$1&start=$(($(($(date +%s)-300))*1000))&end=$(($(date +%s)*1000))&interval=10" \
+	| sed \
+		-e "s/\[\[/[/" \
+		-e "s/\]\]/]/" \
+		-e "s/\],/\n/g" \
+		-e "s/\[//g" \
+		-e "s/\]//g" \
+	| cut -d, -f2 | sort -u | head -1
+}
+
+_SET_ON(){
+	curl -s \
+		http://$RELAY_IP/control/relay.cgi?relay1=1 && \
+	logger -t relay-control "Set relay on [$1]." && \
+	exit 0
+	logger -t relay-control "Was not able to pilot relay on."
+	exit 1
+}
+
+_SET_OFF(){
+	curl -s \
+		http://$RELAY_IP/control/relay.cgi?relay1=0 && \
+	logger -t relay-control "Set relay off [$1]." && \
+	exit 0
+	logger -t relay-control "Was not able to pilot relay off."
+	exit 1
+}
+
+batteryID=58
+BATTERY=$(_FETCH $batteryID)
+
+AC_chargingID=144
+AC=$(_GET $AC_chargingID)
+
+TEMPID=39 # t_chambre1
+TEMPID=36 # t_etable
+#TEMP=$(_GET $TEMPID|cut -d. -f1)
+TEMP=$(_GET $TEMPID|sed 's/\.//'|cut -c-3)
+
+logger -t relay-control "Battery: $BATTERY % ; Charging: $AC ; Reference Temperature: $TEMP"
+
+[ $BATTERY -lt 30 ] && _SET_OFF "low battery (${BATTERY}%)"
+[ $TEMP -gt 185 ] && _SET_OFF "high temperature ($TEMP/10 C)"
+[ $AC -eq 1 ] && _SET_ON "engine is on"
+[ $TEMP -lt 160 ] && _SET_ON "need warmth ($TEMP/10 C)"
+# heure en TZ GMT
+[ $(date +%s) -gt $(date --date='10:00' +%s) -a $(date +%s) -lt $(date --date='16:00' +%s) ] && _SET_OFF "sunny time"
+#[ $(date +%s) -lt $(date --date='04:30' +%s) ] && _SET_OFF "sleeping time"
+#[ $(date +%s) -gt $(date --date='22:30' +%s) ] && _SET_OFF "sleeping time"
+[ $TEMP -lt 175 ] && _SET_ON "need warmth ($TEMP/10 C)"
+
+logger -t relay-control "No operation on relay."
+exit 0
