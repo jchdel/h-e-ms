@@ -35,23 +35,25 @@ I would love to add prediction capabilities based on forecasts, previous reading
 At this time of writing, some sensors are deployed, some still lying in boxes and most not ordered or delivered yet!
 
 What is already in place:
-- EmonPi (Raspberry Pi 3 + RF)
-- EmonRx (arduino + RF)
+- EmonPi (Raspberry Pi 3 + RF + WiFi + ehernet + USB) (soon usb2zigbee, usb21wire, usb2rs485 (modbus))
+- EmonTh (arduino + RF)
 - EmonTx x4 (arduino + RF)
 - Davis weather station (ethernet)
 - Inverter WKS (USB)
 - Wifi MQTT relay
+- Toon (WiFi)
 
 What exists but is to be activated:
 - (USB21wire)
 - (zigbee2mqtt)
-- (USB2RJ485-modbus)
+- (USB2RS485-modbus)
 - (Pylontech BMS)
 - (wind turbine)
 - (wind turbine MPPT)
 
 What is ordered but not delivered yet:
 - zigbee smart plugs
+- linky TIC modules (usb and zigbee)
 - Long infrared heating panels
 
 what is whished:
