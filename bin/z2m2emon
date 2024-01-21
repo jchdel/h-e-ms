@@ -1,0 +1,59 @@
+#!/bin/bash
+##########################################
+# MQTT Shell Listen & inject to MQTT     #
+##########################################
+ME=$(basename $0)
+[ -f /etc/default/$ME ] && . /etc/default/$ME
+[ -z "$MQTT_TOPIC" ] && MQTT_TOPIC=z2m
+##########################################
+ctrl_c() {
+	[ -z $DEBUG ] || echo "\nCleaning up..." >&2
+	if [ "$?" -eq "0" ];
+	then
+		[ -z $DEBUG ] || echo "Exit success" >&2
+		exit 0
+	else
+		[ -z $DEBUG ] || echo "Exit failure" >&2
+		exit 1
+	fi
+}
+##########################################
+listen(){
+	timestamp=$(date +%s)
+	local oIFS=$IFS
+	IFS=' '
+	while read line 
+	do
+		[ -z $DEBUG ] || echo "MQTT: $line"
+		IFS=' '
+		read -ra r <<< "$line"
+		# extract zigbee devive friendly  name from topic
+		# TOPIC is of the form
+		#    z2m/<sensor_id>
+		topic="${r[0]}"
+		message="${r[1]}"
+		IFS='/'
+		read -ra t <<< "$topic"
+		[ "${t[0]}" == "$MQTT_TOPIC" ] || continue
+		[ ${#t[@]} -eq 2 ] || continue
+		id=${t[1]}
+		# filter message to remove unwanted information
+		message=$(echo "$message" | jq -c -M 'del(.update)|del(.child_lock)|del(.indicator_mode)|del(.power_outage_memory)|del(.state)|del(.update_available)')
+		echo "$message" | jq -c -M -r '.| keys_unsorted[]' |
+		while IFS= read -r key
+		do
+			value=$(echo "$message" | jq -c -M -r ".$key")
+			# publish to EmponHub
+			echo $value | mosquitto_pub -l -u emonpi -P emonpimqtt2016 -t emon/$id/$key
+			[ $? -ne 0 ] && echo "Failed to publish $value to topic=emon/$id/$key"
+			# publish to local sensors collection infra (will be forwarded by mosquitto to upstream)
+			#echo "$timestamp;$value" | mosquitto_pub -l -u emonpi -P emonpimqtt2016 -t sensors/$id/$key
+			#[ $? -ne 0 ] && echo "Failed to publish $value to topic=sensors/$id/$key"
+		done 
+		
+	done
+	IFS=$oIFS
+}
+##########################################
+trap ctrl_c INT
+mosquitto_sub -v -u emonpi -P emonpimqtt2016 -t "$MQTT_TOPIC/#" | listen

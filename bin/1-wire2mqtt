@@ -1,0 +1,11 @@
+#!/bin/bash
+set -e
+MQTT_HOST=
+MQTT_USER=
+MQTT_PASS=
+. /etc/mqtt/credentials
+while IFS="," read -r TOPIC FILE
+do
+	/usr/bin/mosquitto_pub -h $MQTT_HOST -u $MQTT_USER -P $MQTT_PASS -t $TOPIC -m "$(date +%s);$(cat $FILE)"
+done < <(tail -n +2 /etc/1-wire/sensors.csv)
+

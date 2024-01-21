@@ -1,0 +1,3 @@
+#!/bin/sh
+echo Mounting wire...
+owfs -u -m /srv/1wire
