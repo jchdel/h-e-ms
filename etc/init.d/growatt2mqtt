@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+
+name="growatt2mqtt"
+
+: ${command_user:="growatt2mqtt"}
+: ${start_wait=100}  # milliseconds
+: ${retry="TERM/10/KILL/5"}
+
+command="/usr/local/bin/growatt2mqtt"
+command_background="yes"
+pidfile="/run/$RC_SVCNAME.pid"
+
+start_stop_daemon_args="--wait $start_wait $start_stop_daemon_args"
+# The leading space is to avoid fallback to $start_stop_daemon_args when this
+# is empty (supervise-daemon doesn't support --wait).
+supervise_daemon_args=" $supervise_daemon_args"
+
+export GROWATT2MQTT_DATA="${datadir:="/var/local/growatt2mqtt"}"
+
+depend() {
+	need dev localmount
+	use mosquitto
+}

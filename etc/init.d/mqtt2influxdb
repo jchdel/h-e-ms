@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+
+name="mqtt2influxdb"
+
+: ${command_user:="mqtt2influxdb"}
+: ${start_wait=100}  # milliseconds
+: ${retry="TERM/10/KILL/5"}
+
+command="/usr/local/bin/mqtt2influxdb"
+command_background="yes"
+pidfile="/run/$RC_SVCNAME.pid"
+
+start_stop_daemon_args="--wait $start_wait $start_stop_daemon_args"
+# The leading space is to avoid fallback to $start_stop_daemon_args when this
+# is empty (supervise-daemon doesn't support --wait).
+supervise_daemon_args=" $supervise_daemon_args"
+
+export MQTT2INFLUXDB_DATA="${datadir:="/var/local/mqtt2influxdb"}"
+
+depend() {
+	need dev localmount
+	use mosquitto influxdb
+}

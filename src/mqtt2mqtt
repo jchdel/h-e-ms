@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+
+import paho.mqtt.publish as publish
+import paho.mqtt.client as mqtt
+mqtt_broker = 'localhost'
+mqtt_port   = 1883
+mqtt_auth   = { 'username': 'emonpi', 'password':'emonpimqtt2016' }
+mqtt_prefix = "sensors/#"
+
+import redis
+redis_host = 'localhost'
+redis_port = 6379
+
+import csv
+def merge(*dict_args):
+    result = {}
+    for dictionary in dict_args:
+        result.update(dictionary)
+    return result
+
+from datetime import date
+from datetime import timedelta
+from datetime import datetime
+
+import syslog
+
+processes = {}
+taskList = {}
+#task = {'function':<function_name>, 'params': <dict_args>}
+
+#######################################################################
+
+def noop(timestamp, value, dict_args):
+    return value
+processes['noop'] = noop
+
+def debug(timestamp, value, dict_args):
+    print('ARGS:',dict_args)
+    print('VALUE:',value)
+    return value
+processes['debug'] = debug
+
+def scale(timestamp, value, dict_args):
+    if value is None: return value
+    factor = float(dict_args['param'])
+    return float(value) * factor
+processes['scale'] = scale
+
+def divide(timestamp, value, dict_args):
+    if value is None: return value
+    value = float(value)
+    factor = float(dict_args['param'])
+    if factor == 0: return None
+    return float(value / factor)
+processes['divide'] = divide
+
+def offset(timestamp, value, dict_args):
+    if value is None: return value
+    value = float(value)
+    term = float(dict_args['param'])
+    return value + term
+processes['offset'] = offset
+
+def allowpositive(timestamp, value, dict_args):
+    if float(value) < 0: value = 0.0
+    return value
+processes['allowpositive'] = allowpositive
+
+def allownegative(timestamp, value, dict_args):
+    if float(value) > 0: value = 0.0
+    return value
+processes['allownegative'] = allownegative
+
+def max_value_allowed(timestamp, value, dict_args):
+    factor = float(dict_args['param'])
+    if float(value) > factor: value = factor
+    return value
+processes['max_value_allowed'] = max_value_allowed
+
+def min_value_allowed(timestamp, value, dict_args):
+    factor = float(dict_args['param'])
+    if float(value) < factor: value = factor
+    return value
+processes['min_value_allowed'] = min_value_allowed
+
+def reset2zero(timestamp, value, dict_args):
+    value = 0
+    return value
+processes['reset2zero'] = reset2zero
+
+def reduce2bootstrap(timestamp, value, dict_args):
+    try: 
+        bootstrap_value = get_value_from_redis('{}/bootsrap'.format(dict_args['topic']))
+    except:
+        bootstrap_value = value
+        publish_to_cache(timestamp, value, {'topic': '{}/bootsrap'.format(dict_args['topic'])})
+    return float(value) - float(bootstrap_value)
+processes['reduce2bootstrap'] = reduce2bootstrap
+
+def reset2original(timestamp, value, dict_args):
+    value = get_value_from_redis('{}/original'.format(dict_args['topic']))
+    return value
+processes['reset2original'] = reset2original
+
+def reset2null(timestamp, value, dict_args):
+    return None
+processes['reset2null'] = reset2null
+
+def signed2unsigned(timestamp, value, dict_args):
+    if int(value) < 0: value = int(value) + 65536
+    return value
+processes['signed2unsigned'] = signed2unsigned
+
+def abs_value(timestamp, value, dict_args):
+    return abs(float(value))
+processes['abs_value'] = abs_value
+
+def times_sensor(timestamp, value, dict_args):
+    sensor_id = dict_args['param']
+    try: sensor = get_value_from_redis(sensor_id)
+    except: 
+        syslog.syslog ('Unable to fetch {} value from Redis! Aborting!'.format(sensor_id))
+        return value
+    return float(value) * float(sensor)
+processes['times_sensor'] = times_sensor
+
+def divide_sensor(timestamp, value, dict_args):
+    sensor_id = dict_args['param']
+    try: sensor = get_value_from_redis(sensor_id)
+    except: 
+        syslog.syslog ('Unable to fetch {} value from Redis! Aborting!'.format(sensor_id))
+        return value
+    if float(sensor) == 0: return None
+    return float(value) / float(sensor)
+processes['divide_sensor'] = divide_sensor
+
+def add_sensor(timestamp, value, dict_args):
+    sensor_id = dict_args['param']
+    try: sensor = get_value_from_redis(sensor_id)
+    except: 
+        syslog.syslog ('Unable to fetch {} value from Redis! Aborting!'.format(sensor_id))
+        return value
+    return float(value) + float(sensor)
+processes['add_sensor'] = add_sensor
+
+def substract_sensor(timestamp, value, dict_args):
+    sensor_id = dict_args['param']
+    try: sensor = get_value_from_redis(sensor_id)
+    except: 
+        syslog.syslog ('Unable to fetch {} value from Redis! Aborting!'.format(sensor_id))
+        raise
+    response = float(value) - float(sensor)
+    return response
+processes['substract_sensor'] = substract_sensor
+
+def max_sensor(timestamp, value, dict_args):
+    sensor_id = dict_args['param']
+    try: sensor = get_value_from_redis(sensor_id)
+    except: 
+        syslog.syslog ('Unable to fetch {} value from Redis! Aborting!'.format(sensor_id))
+        return value
+    if float(value) < float(sensor): return value
+    else: return sensor
+processes['max_sensor'] = max_sensor
+
+def min_sensor(timestamp, value, dict_args):
+    sensor_id = dict_args['param']
+    try: sensor = get_value_from_redis(sensor_id)
+    except: 
+        syslog.syslog ('Unable to fetch {} value from Redis! Aborting!'.format(sensor_id))
+        return value
+    if float(value) > float(sensor): return value
+    else: return sensor
+processes['min_sensor'] = min_sensor
+
+def report_power(timestamp, value, dict_args):
+    try: topic = dict_args['topic']
+    except: 
+        syslog.syslog ('No power channel provided. Aborting!')
+    return value
+
+def power_to_energy(timestamp, value, dict_args):
+    try: topic = dict_args['topic']
+    except: 
+        syslog.syslog ('No power channel provided. Aborting!')
+        return value
+    try: energy_name = dict_args['energy_name']
+    except: 
+        syslog.syslog ('No energy channel provided. Aborting!')
+        return value
+    try: previous_timestamp, previous_value = get_previous_from_redis(topic)
+    except: 
+        syslog.syslog ('No previous power value found for {}'.format(topic))
+        previous_timestamp = timestamp
+        previous_value = 0.0
+    try: previous_t_energy, previous_v_energy = get_from_redis(energy_name)
+    except: 
+        syslog.syslog ('No previous energy value found for {}'.format(energy_name))
+        previous_v_energy = 0.0
+        previous_t_energy = timestamp
+    # a bit of computation
+    # beware about the data types
+    timestamp    = int(timestamp)
+    previous_timestamp = int(previous_timestamp)
+    delta_time   = float(int(timestamp) - int(previous_timestamp))
+    delta_value  = float(value) - float(previous_value)
+    delta_energy = delta_time * float(previous_value) + ( delta_value * delta_time * 0.5 )
+    # power is in Watt, and time in second. We want kWh for energy.
+    delta_energy = delta_energy / 3600 / 1000
+    energy       = float(previous_v_energy) + delta_energy
+    return energy
+processes['power_to_energy'] = power_to_energy
+
+def energy_to_energy_monthly(timestamp, value, dict_args):
+    try: energy_name = dict_args['energy_name']
+    except: 
+        syslog.syslog ('No energy channel provided. Aborting!')
+        return value
+    abs_energy_name_daily   = 'abs_{}_daily'.format(energy_name)
+    energy_name_daily       = '{}_daily'.format(energy_name)
+    abs_energy_name_weekly  = 'abs_{}_weekly'.format(energy_name)
+    energy_name_weekly      = '{}_weekly'.format(energy_name)
+    abs_energy_name_monthly = 'abs_{}_monthly'.format(energy_name)
+    energy_name_monthly     = '{}_monthly'.format(energy_name)
+    today                   = date.today()
+    yesterday               = today - timedelta(days = 1)
+    previous_timestamp, previous_value = get_previous_from_redis(energy_name)
+    previous_date           = date.fromtimestamp(int(previous_timestamp))
+    if previous_date == yesterday:
+        try: t_daily, v_daily = get_from_redis(abs_energy_name_daily)
+        except:
+            t_daily = previous_timestamp
+            v_daily = 0.0
+        publish_to_cache(previous_timestamp, previous_value, {'topic': abs_energy_name_daily})
+        # we just computed yesterday's value! let's adapt the publish date accordingly...
+        #publish_date = yesterday - timedelta(days = 1)
+        #publish_timestamp = int(datetime(year=publish_date.year,month=publish_date.month,day=publish_date.day,).timestamp())
+        #publish_to_timeserie(publish_timestamp, float(previous_value) - float(v_daily), {'topic': energy_name_daily})
+        publish_to_timeserie(previous_timestamp, float(previous_value) - float(v_daily), {'topic': energy_name_daily})
+    if previous_date == yesterday and today.isoweekday() == 1:
+        try: t_weekly, v_weekly = get_from_redis(abs_energy_name_weekly)
+        except:
+            t_weekly = previous_timestamp
+            v_weekly = 0.0
+        publish_to_cache(previous_timestamp, previous_value, {'topic': abs_energy_name_weekly})
+        publish_to_timeserie(previous_timestamp, float(previous_value) - float(v_weekly), {'topic': energy_name_weekly})
+    if previous_date == yesterday and today.day == 1:
+        try: t_monthly, v_monthly = get_from_redis(abs_energy_name_monthly)
+        except:
+            t_monthly = previous_timestamp
+            v_monthly = 0.0
+        publish_to_cache(previous_timestamp, previous_value, {'topic': abs_energy_name_monthly})
+        publish_to_timeserie(previous_timestamp, float(previous_value) - float(v_monthly), {'topic': energy_name_monthly})
+    return value
+processes['energy_to_energy_monthly'] = energy_to_energy_monthly
+
+def energy_to_energy_today(timestamp, value, dict_args):
+    try: energy_name = dict_args['energy_name']
+    except: 
+        syslog.syslog ('No energy channel provided. Aborting!')
+        return value
+    today        = date.today()
+    yesterday    = today - timedelta(days = 1)
+    energy_name_today_initial = '{}_today_initial'.format(energy_name)
+    try: initial_timestamp, initial_energy = get_from_redis(energy_name_today_initial)
+    except: 
+        initial_energy = 0.0
+        initial_timestamp = timestamp
+        publish_to_cache(timestamp, initial_energy, {'topic': energy_name_today_initial})
+    initial_date = date.fromtimestamp(int(initial_timestamp))
+    if initial_date == yesterday:
+        initial_energy = value
+        publish_to_cache(timestamp, initial_energy, {'topic': energy_name_today_initial})
+    daily_energy = float(value) - float(initial_energy)
+    return daily_energy
+processes['energy_to_energy_today'] = energy_to_energy_today
+
+def accumulator(timestamp, value, dict_args):
+    return value
+#processes['accumulator'] = accumulator
+
+def pulse_diff(timestamp, value, dict_args):
+    return value
+#processes['pulse_diff'] = pulse_diff
+
+def energy_to_power(timestamp, value, dict_args):
+    return value
+#processes['energy_to_power'] = energy_to_power
+
+def publish_to_mqtt(timestamp, value, dict_args):
+    topic = dict_args['topic']
+    payload = '{};{}'.format(timestamp, value)
+    msg = {'topic': topic, 'payload': payload}
+    publish.multiple([msg])
+    return value
+processes['publish_to_mqtt'] = publish_to_mqtt
+
+def publish_to_sensors(timestamp, value, dict_args):
+    topic = 'sensors/{}'.format(dict_args['topic'])
+    publish_to_mqtt(timestamp, value, {'topic': topic})
+    return value
+processes['publish_to_sensors'] = publish_to_sensors
+
+def publish_to_timeserie(timestamp, value, dict_args):
+    otopic = dict_args['topic']
+    topic = 'timeserie/{}'.format(dict_args['topic'])
+    publish_to_mqtt(timestamp, value, {'topic': topic})
+    publish_to_cache(timestamp, value, {'topic': otopic})
+    return value
+processes['publish_to_timeserie'] = publish_to_timeserie
+
+def allocate_extra_power(timestamp, value, dict_args):
+    power = float(value)
+    if power > 0: # battery is discharging
+        # no extra power to allocate. Do we need to stop some load?
+        soc = int(get_value_from_redis('battery/state_of_charge'))
+        if soc < 50:
+            # stop free load(s)
+            None
+            topic   = 'zigbee2mqtt/{}/set_payload'.format(load_name)
+            payload = '{"state":"{}"}'.format('OFF')
+        else:
+            None
+    return value
+processes['allocate_extra_power'] = allocate_extra_power
+
+#######################################################################
+
+def publish_to_cache(timestamp, value, dict_args):
+    topic = dict_args['topic']
+    payload = '{};{}'.format(timestamp, value)
+    previous = redis_client.get(topic)
+    if previous == None: previous = payload
+    redis_client.set('{}/previous'.format(topic), previous)
+    redis_client.set(topic, payload)
+    return value
+processes['publish_to_cache'] = publish_to_cache
+
+def get_from_redis(topic):
+    # fetch from redis
+    payload = redis_client.get(topic)
+    timestamp = payload.split(';')[0]
+    value = payload.split(';')[1]
+    return timestamp, value
+
+def get_value_from_redis(topic):
+    timestamp, value = get_from_redis(topic)
+    return value
+
+def get_previous_from_redis(topic):
+    # fetch from redis
+    payload = redis_client.get('{}/previous'.format(topic))
+    timestamp = payload.split(';')[0]
+    value = payload.split(';')[1]
+    return timestamp, value
+
+def get_previous_value_from_redis(topic):
+    timestamp, value = get_previous_from_redis(topic)
+    return value
+
+#######################################################################
+
+def register(topic, taskname, params):
+    if taskname not in processes.keys(): 
+        syslog.syslog('{} is not a valid TASKNAME. forcing to be "noop"'.format(taskname))
+        taskname = 'noop'
+    if not topic in taskList: 
+        syslog.syslog('Never saw this TOPIC before ({}). Adding to the list...'.format(topic))
+        taskList[topic] = []
+        #taskList[topic].append({'name': 'publish_to_cache', 'function': publish_to_cache, 'params': {'topic': topic}})
+    taskList[topic].append({'name': taskname, 'function': processes[taskname], 'params': params})
+    syslog.syslog('TASK {} registered FOR TOPIC {}'.format(taskname, topic))
+
+#######################################################################
+
+def apply_filter(topic, payload):
+    try:
+        timestamp = payload.split(';')[0]
+        value = payload.split(';')[1]
+    except: # seems no timestamp was provided
+        timestamp = int(datetime.now().timestamp())
+        value = payload
+        #syslog.syslog('CORRECTION FOR {}: {};{}'.format(topic, timestamp, value))
+    publish_to_cache(timestamp, value, {'topic': '{}/original'.format(topic)})
+    if not topic in taskList: 
+        #syslog.syslog('no task defined yet FOR {}'.format(topic))
+        register(topic, 'noop', None)
+    for task in taskList[topic]:
+        try:
+            #if task['name'] != 'noop' and task['name'] != 'publish_to_cache': 
+            #    syslog.syslog ('Running TASK {} FOR {}...'.format(task,topic))
+            #print(topic,'before: ',value)
+            value = task['function'](timestamp, value, task['params'])
+            #print('after',task['name'],':',value)
+        except:
+            syslog.syslog('error in TASK {}'.format(task['name']))
+            break
+    redis_client.delete('{}/original'.format(topic))
+    redis_client.delete('{}/original/previous'.format(topic))
+    return value
+
+#######################################################################
+
+print('#######################################################################')
+print('Available process blocks:')
+print(processes.keys())
+print('#######################################################################')
+
+#######################################################################
+
+def on_mqtt_connect(client, userdata, flags, rc):
+    if rc == 0:
+        syslog.syslog("Connected to MQTT Broker!")
+        print('#######################################################################')
+        print('############### looping, waiting for MQTT messages... #################')
+        print('#######################################################################')
+    else:
+        syslog.syslog("Failed to connect, return code %d\n", rc)
+        exit
+
+def on_mqtt_message(client, userdata, msg):
+    t_prefix = str(msg.topic).split('/')[0]
+    t_device = str(msg.topic).split('/')[1]
+    t_type   = str(msg.topic).split('/')[2]
+    topic    = '{}/{}'.format(t_device, t_type)
+    # msg.payload is a b_str
+    payload  = msg.payload.decode('ASCII') 
+    apply_filter(topic, payload)
+
+#######################################################################
+
+def read_config(config_file):
+    # must become resilient...
+    with open(config_file, newline='') as csvfile:
+        fieldnames = ['topic', 'taskname', 'params']
+        confreader = csv.DictReader(csvfile, fieldnames=fieldnames)
+        for raw in confreader:
+            topic=raw['topic']
+            taskname=raw['taskname']
+            params={}
+            for arg in str(raw['params']).split(';'):
+                duo = arg.split('=')
+                key=duo[0]
+                value=duo[1]
+                params[key]=value
+            register(topic, taskname, params)
+    syslog.syslog('Configuration loaded!')
+    #print(taskList)
+
+#######################################################################
+
+try: 
+    config_file = '/usr/local/etc/hems.processes.csv'
+    read_config(config_file)
+except: 
+    syslog.syslog('failed to read config file {}'.format(config_file))
+    exit
+mqtt_client = mqtt.Client()
+mqtt_client.username_pw_set('emonpi', 'emonpimqtt2016')
+mqtt_client.on_connect = on_mqtt_connect
+mqtt_client.on_message = on_mqtt_message
+try: 
+    mqtt_client.connect(mqtt_broker, mqtt_port)
+except: 
+    exit
+mqtt_client.subscribe(mqtt_prefix)
+
+try: 
+    redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+    syslog.syslog('Connected to Redis cache!')
+    #for key in redis_client.scan_iter():
+    #    redis_client.delete(key)
+    #    print(key, 'deleted')
+except: 
+    exit
+
+mqtt_client.loop_forever()

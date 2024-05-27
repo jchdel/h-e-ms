@@ -1,0 +1,9 @@
+#!/bin/sh
+[ $# -ne 2 ] && exit 1
+FRIENDLY_NAME=$1
+STATE=$2
+[ "$STATE" == "0" ] && STATE=OFF
+[ "$STATE" == "off" ] && STATE=OFF
+[ "$STATE" == "1" ] && STATE=ON
+[ "$STATE" == "on" ] && STATE=ON
+mosquitto_pub -t "zigbee2mqtt/$FRIENDLY_NAME/set_payload" -m "{\"state\":\"$STATE\"}"

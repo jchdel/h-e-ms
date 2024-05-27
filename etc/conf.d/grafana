@@ -1,0 +1,17 @@
+GRAFANA_HOME=/var/lib/grafana
+GRAFANA_OPTS="-config /etc/grafana.ini -homepath /usr/share/grafana
+cfg:paths.data=$GRAFANA_HOME/data
+cfg:paths.plugins=$GRAFANA_HOME/plugins
+cfg:paths.provisioning=$GRAFANA_HOME/provisioning
+cfg:log.mode=syslog
+cfg:server.protocol=http
+cfg:server.http_addr=
+cfg:server.http_port=3000
+cfg:server.domain=hems.local
+cfg:server.enforce_domain=true
+cfg:analytics.reporting_enabled=false
+cfg:analytics.check_for_updates=false
+cfg:analytics.check_for_plugin_updates=false
+cfg:analytics.feedback_links_enabled=false
+cfg:feature_management.hidden_toggles=
+cfg:feature_management.read_only_toggles="

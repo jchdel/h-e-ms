@@ -1,0 +1,21 @@
+WORKDIR=/var/local/mqtt2influxdb
+MQTT_TOPIC=timeserie
+DATABASE=sensors
+
+# Configuration for /etc/init.d/mqtt2influxdb
+
+# Path to the data directory.
+#datadir="/var/local/mqtt2influxdb"
+
+# The user (and group) to run mqtt2influxdb as.
+#command_user="mqtt2influxdb"
+
+# Wait 10 seconds for shutdown before killing the process.
+#retry="TERM/10/KILL/5"
+
+# Number of milliseconds to wait after starting to check if the daemon is still
+# running (used only with start-stop-daemon). Set to empty string to disable.
+#start_wait=100
+
+# Uncomment to run with process supervisor.
+# supervisor="supervise-daemon"

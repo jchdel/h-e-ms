@@ -1,0 +1,18 @@
+
+#!/bin/sh
+
+[ -z "$DATABASE" ] && DATABASE="sensors"
+nl=0
+while read line
+do
+  nl=$(($nl+1))
+  [ $nl -eq 1 ] && continue
+  pve=$(echo $line | cut -d, -f1)
+  pve10=$(echo $line | cut -d, -f2)
+  pve90=$(echo $line | cut -d, -f3)
+  dt=$(echo $line | cut -d, -f4|sed -e 's/T/ /' -e 's/Z//')
+  ts=$(date -d "$dt" +%s)
+  LINE="solarcast PvEstimate=$pve,PvEstimate10=$pve10,PvEstimate90=$pve90 $ts"
+  INTO= # for retention policy
+  influx -database $DATABASE -precision s -execute "INSERT $INTO $LINE"
+done

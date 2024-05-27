@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+
+name="z2m2mqtt"
+
+: ${command_user:="z2m2mqtt"}
+: ${start_wait=100}  # milliseconds
+: ${retry="TERM/10/KILL/5"}
+
+command="/usr/local/bin/z2m2mqtt"
+command_background="yes"
+pidfile="/run/$RC_SVCNAME.pid"
+
+start_stop_daemon_args="--wait $start_wait $start_stop_daemon_args"
+# The leading space is to avoid fallback to $start_stop_daemon_args when this
+# is empty (supervise-daemon doesn't support --wait).
+supervise_daemon_args=" $supervise_daemon_args"
+
+export Z2M2MQTT_DATA="${datadir:="/var/local/z2m2mqtt"}"
+
+depend() {
+	need dev localmount
+	use mosquitto zigbee2mqtt
+}

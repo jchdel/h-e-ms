@@ -1,0 +1,84 @@
+#!/bin/bash
+##########################################
+# MQTT Shell Listen & inject to influxDB #
+##########################################
+ME=$(basename $0)
+[ -f /etc/conf.d/$ME ] && . /etc/conf.d/$ME
+[ -z "$WORKDIR" ] && WORKDIR=/var/local/$ME
+[ -z "$MQTT_TOPIC" ] && MQTT_TOPIC=feeds
+[ -z "$DATABASE" ] && DATABASE="$MQTT_TOPIC"
+##########################################
+ctrl_c() {
+	[ -z $DEBUG ] || echo "\nCleaning up..."
+	if [ "$?" -eq "0" ];
+	then
+		[ -z $DEBUG ] || echo "Exit success"
+		exit 0
+	else
+		[ -z $DEBUG ] || echo "Exit failure"
+		exit 1
+	fi
+}
+##########################################
+send_to_influxdb() {
+	#send_to_influxdb $id $value $timestamp
+	[ $# -eq 3 ] || return 1
+	LINE="$1 $2 ${3}"
+	INTO= # for retention policy
+	influx -database $DATABASE -precision s -execute "INSERT $INTO $LINE"
+	if [ $? -ne 0 ] 
+	then 
+		echo "INFLUXDB FAILURE: $LINE"
+	else
+		[ -z $DEBUG ] || echo "INFLUX OK: $LINE"
+	fi
+}
+##########################################
+listen(){
+	# messages are sent for instance with
+	# mosquitto_pub -h 192.168.8.108 \
+	#	-t $MQTT_TOPIC/dummy1 -m "$(date +%s);$value" 
+	local oIFS=$IFS
+	IFS=' '
+	while read line 
+	do
+		[ -z $DEBUG ] || echo "MQTT: $line"
+		IFS=' '
+		read -ra r <<< "$line"
+		# extract timeserie from topic
+		# TOPIC is of the form
+		#    $MQTT_TOPIC/<sensor_id>
+		topic="${r[0]}"
+		IFS='/'
+		read -ra t <<< "$topic"
+		[ "${t[0]}" == "$MQTT_TOPIC" ] || continue
+		# test if array has 3 members
+		[ ${#t[@]} -eq 3 ] || continue
+		id=${t[1]}
+		va=${t[2]}
+		# extract timestamp and value from message
+		# MESSAGE is of the form
+		#     <timestamp>;<value>
+		message="${r[1]}"
+		IFS=';'
+		read -ra m <<< "$message"
+		# test if array has 2 members
+		[ ${#m[@]} -eq 2 ] || continue
+		# TODO develop following filter...
+		# whatif if singe value or key=value batch
+		# test if '=' is present in the string?
+		[ 0 ] && value="${va}=${m[1]}" || value="${m[1]}"
+		timestamp=${m[0]}
+		# send_to_influxdb topic message
+		send_to_influxdb $id $value $timestamp
+		aend=$(date +%s)
+		duration=$(($aend-$timestamp))
+		[ -z "$DEBUG" ] || echo "Data in transit for $duration seconds" 
+	done
+	IFS=$oIFS
+}
+##########################################
+#influx -execute "CREATE DATABASE $DATABASE"
+trap ctrl_c INT
+[ -z "$DEBUG" ] || echo "Listening to $MQTT_TOPIC"
+mosquitto_sub -v -t $MQTT_TOPIC/# | listen

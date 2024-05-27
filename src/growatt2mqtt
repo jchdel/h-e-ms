@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+
+import time
+import datetime
+import os
+import sys
+import paho.mqtt.publish as publish
+import modbus_tk
+import modbus_tk.defines as cst
+import modbus_tk.modbus_rtu as modbus_rtu
+import serial
+
+influxmeasurement = "inverter"
+MQTT_TOPIC = "sensors"
+
+interval = 60
+
+numinverters = 1
+inverterusbport1 = "/dev/ttyUSB0"
+unit = 1
+name = "growatt"
+
+verbose = 0
+gwverbose = 0
+gwinfodump = 0
+
+# Codes
+StatusCodes = {
+    0: "Standby",
+    1: "noUSE",
+    2: "Discharge",
+    3: "Fault",
+    4: "Flash",
+    5: "PV Charge",
+    6: "AC Charge",
+    7: "Combine Charge",
+    8: "Combine charge and Bypass",
+    9: "PV charge and Bypass",
+    10: "AC Charge and Bypass",
+    11: "Bypass",
+    12: "PV charge and discharge"
+}
+
+def merge(*dict_args):
+    result = {}
+    for dictionary in dict_args:
+        result.update(dictionary)
+    return result
+
+class Growatt:
+    def __init__(self, master, name, unit):
+        self.master = master
+        self.name = name
+        self.unit = unit
+
+        result = self.master.execute(1, cst.READ_HOLDING_REGISTERS, 73, 1)
+
+        self.modbusVersion = result[0]
+
+    def readConfig(self):
+        result = self.master.execute(1, cst.READ_HOLDING_REGISTERS, 0, 81)
+        if verbose: print("CHECK2")
+        info = {                                                        # ==================================================================
+            "StatusCode": result[0],                             # 0000 off,outputon 0001 on,outen 0100 off/disa 0101 on,disa
+            "OutputConfig": result[1],                           # 0 bat first, 1 pv first, 2 uti first
+            "ChargeConfig": result[2],                           # 0 PV first, 1 pv&uti, 2 PV only
+            "UtiOutStart": result[3],                            # 0-23 (Hours)
+            "UtiOutEnd": result[4],                              # 0-23 (Hours)
+            "UtiChargeStart": result[5],                         # 0-23 (Hours)
+            "UtiChargeEnd": result[6],                           # 0-23 (Hours)
+            "PVmodel": result[7],                                # 0 independent, 1 parallel
+            "ACInModel": result[8],                              # 0 APL,90-280vac UPS 170-280vac
+            "FwVersionH": result[9],                             #
+            "FwVersionM": result[10],                            #
+            "FwVersionH": result[11],                            #
+            "FwVersion2H": result[12],                             #
+            "FwVersion2M": result[13],                            #
+            "FwVersion2H": result[14],                            #
+            "OutputVoltType": result[18],                           #0:208, 1:230, 2:240
+            "OutputFreqType": result[19],                           #0:50hz 1:60hz
+            "OverLoadRestart": result[20],                           #0yes, 1 no, 2switch to uti
+            "OverTempRestart": result[21],                           #0yes, 1 no
+            "BuzzerEN": result[22],                           #0 no,1 yes,
+            "Serno5": result[23],                           #
+            "Serno4": result[24],                           #
+            "Serno3": result[25],                           #
+            "Serno2": result[26],                           #
+            "Serno1": result[27],                           #
+            "MoudleH": result[28],                           #
+            "MoudleL": result[29],                           #P0 lead, 1 lithium, 2 customlead  User 0 no, 1growatt, 2cps, 3haiti M 3kw 5kw, Saging 0 norm/1aging
+            "ComAddress": result[30],                           #1-254
+            "FlashStart": result[31],                           #0001-own, 0100 control board
+            "MaxChargeCurr": result[34],                           #10-130
+            "BulkChargeVolt": float(result[35]) / 10,            #.1v 500-580
+            "FloatChargeVolt": float(result[36]) / 10,            #.1v 500-560
+            "BatLowtoUtiVolt": float(result[37]) / 10,            #.1v 444-514
+            "FloatChargeCurr": float(result[38]) / 10,            #.1a 0-80
+            "BatteryType": result[39],                           #0 lead acid, 1 lithium, 2 customLead
+            "Aging Mode": result[40],                           #0 normal, 1 aging mode
+            "DTC": result[43],                           #&*6
+            "SysYear": result[45],                           #
+            "SysMonth": result[46],                           #
+            "SysDay": result[47],                           #
+            "SysHour": result[48],                           #
+            "SysMin": result[49],                           #
+            "SysSec": result[50],                           #
+            "FWBuild4": result[67],                           #
+            "FWBuild3": result[68],                           #
+            "FWBuild2": result[69],                           #
+            "FWBuild1": result[70],                           #
+            "SysWeekly": result[72],                           #0-6
+            "RateWattH": float(result[76]) / 10,               # 0.1w
+            "RateWattL": float(result[77]) / 10,               # 0.1w
+            "RateVAH": float(result[78]) / 10,               # 0.1w
+            "RateVAL": float(result[79]) / 10,               # 0.1w
+            "Factory": result[80]                           #ODM Info Code
+        }
+        print(info)
+        return info
+
+    def readStatus(self):
+        result = self.master.execute(1, cst.READ_INPUT_REGISTERS, 0, 83)
+        if gwverbose: print("GWVERBOSE2")
+        if gwverbose: print("GWVERBOSE3")
+        info = {                                    # ==================================================================
+            #"Module": unit,
+            "StatusCode": result[0],         # N/A,      Inverter Status,    Inverter run state
+            #"Status": StatusCodes[result[0]],
+            "Vpv1": float(result[1]) / 10,               # 0.1V,     PV1 voltage
+            "Vpv2": float(result[2]) / 10,               # 0.1V,     PV2 voltage
+            "Ppv1H": float(result[3]) / 10,              # 0.1W,     PV1 Charge power (high)
+            "Ppv1L": float(result[4]) / 10,              # 0.1W,     PV1 Charge power (low) 
+            "Ppv2H": float(result[5]) / 10,              # 0.1W,     PV2 Charge power (high)
+            "Ppv2L": float(result[6]) / 10,              # 0.1W,     PV2 Charge power (low)
+            "Buck1Curr": float(result[7]) / 10,          # 0.1A,     Buck1 current
+            "Buck2Curr": float(result[8]) / 10,          # 0.1A,     Buck2 current
+            "OP_WattH": float(result[9]) / 10,           # 0.1W,     Output active power (high)
+            "OP_WattL": float(result[10]) / 10,          # 0.1W,     Output active power (low)
+            "OP_VAH": float(result[11]) / 10,            # 0.1VA     Output apparent power (high)
+            "OP_VAL": float(result[12]) / 10,            #
+            "ACChr_WattH": float(result[13]) / 10,       # 0.1W,     AC Charge Watts (high)
+            "ACChr_WattL": float(result[14]) / 10,       #
+            "ACChr_VAH": float(result[15]) / 10,         # 0.1VA,    AC Charge apparent power (high)
+            "ACChr_VAL": float(result[16]) / 10,         #
+            "Bat_Volt": float(result[17]) / 100,         # 0.01V,    Battery Voltage
+            "BatterySOC": float(result[18]) / 1,         # 1%,       Battery State of Charge
+            "BusVolt": float(result[19]) / 10,           # 0.1V,     Bus Voltage
+            "GridVolt": float(result[20]) / 10,          # 0.1V,     AC input Voltage
+            "LineFreq": float(result[21]) / 100,         # 0.01Hz,   AC input Freq
+            "OutputVolt": float(result[22]) / 10,        # 0.1V,     AC Output Voltage
+            "OutputFreq": float(result[23]) / 100,       # 0.01Hz    AC Output Freq
+            "OutputDCV": float(result[24]) / 10,         # 0.1V      DC Output Voltage
+            "InvTemp": float(result[25]) / 10,           # 0.1C      Inverter Temp
+            "DCDCTemp": float(result[26]) / 10,          # 0.1C      DCDC Temp
+            "LoadPercent": float(result[27]) / 10,       # 0.1%      Inverter Load Percent
+            "Bat_dspp_V": float(result[28]) / 100,         # 0.01V     Battery-port volt (DSP)
+            "Bat_dspb_V": float(result[29]) / 100,         # 0.01V     Battery-bus voltage (DSP)
+            "TimeTotalH": float(result[30]) / 2,         # 0.5S,     Time total H,       Work time total (high)
+            "TimeTotalL": float(result[31]) / 2,         # 0.5S,     Time total L,       Work time total (low)
+            "Buck1Temp": float(result[32]) / 10,         # 0.1C,     Temperature,        Inverter temperature
+            "Buck2Temp": float(result[33]) / 10,         # 0.1C,     Temperature,        Inverter temperature
+            "OP_Curr": float(result[34]) / 10,           # 0.1A,     Output Current
+            "Inv_Curr": float(result[35]) / 10,          # 0.1A,     Inv Current
+            "AC_InWattH": float(result[36]) / 10,        # 0.1W,     AC Input watt (high)
+            "AC_InWattL": float(result[37]) / 10,        # 0.1W,     AC Input watt (low)
+            "AC_InVAH": float(result[38]) / 10,          # 0.1A,     AC Input VA (high)
+            "AC_InVAL": float(result[39]) / 10,          # 0.1A,     AC Input VA (low)
+            "Faultbit": float(result[40]),               # &*1
+            "Warnbit": float(result[41]),                # &*1
+            "Faultvalue": float(result[42]),             # fault value
+            "Warnvalue": float(result[43]),              # warn value
+            "DTC": float(result[44]),                    #
+            "CheckStep": float(result[45]),              #
+            "ProductionLM": float(result[46]),           #
+            "ConstPOKF": float(result[47]),                # Constant power ok flag (0 no, 1 OK)
+            "Epv1_todayH": float(result[48]) / 10,       # 0.1kWh,   Energy today H,     Today generate energy (high)
+            "Epv1_todayL": float(result[49]) / 10,       # 0.1kWh,   Energy today l,     Today generate energy (low)
+            "Epv1_totalH": float(result[50]) / 10,       # 0.1kWh,   Energy total H,     generate energy total (high)
+            "Epv1_totalL": float(result[51]) / 10,       # 0.1kWh,   Energy total l,     generate energy total (low)
+            "Epv2_todayH": float(result[52]) / 10,       # 0.1kWh,   Energy today H,     Today generate energy (high)
+            "Epv2_todayL": float(result[53]) / 10,       # 0.1kWh,   Energy today l,     Today generate energy (low)
+            "Epv2_totalH": float(result[54]) / 10,       # 0.1kWh,   Energy total H,     generate energy total (high)
+            "Epv2_totalL": float(result[55]) / 10,       # 0.1kWh,   Energy total l,     generate energy total (low)
+            "Eac_chrtodayH": float(result[56]) / 10,     # 0.1kWh,   AC charge Energy Today (high)
+            "Eac_chrtodayL": float(result[57]) / 10,     # 0.1kWh,   AC charge Energy Todat (low)
+            "Eac_chrtotalH": float(result[58]) / 10,     # 0.1kWh,   AC charge Energy Total (high)
+            "Eac_chrtotalL": float(result[59]) / 10,     # 0.1kWh,   AC charge Energy Total (low)
+            "Ebat_chrtodayH": float(result[60]) / 10,    # 0.1kWh,   Bat discharge Energy Today (high)
+            "Ebat_chrtodayL": float(result[61]) / 10,    # 0.1kWh,   Bat discharge Energy Todat (low)
+            "Ebat_chrtotalH": float(result[62]) / 10,    # 0.1kWh,   Bat discharge Energy Total (high)
+            "Ebat_chrtotalL": float(result[63]) / 10,    # 0.1kWh,   Bat discharge Energy Total (low)
+            "Eac_dischrtodayH": float(result[64]) / 10,  # 0.1kWh,   AC discharge Energy Today (high)
+            "Eac_dischrtodayL": float(result[65]) / 10,  # 0.1kWh,   AC discharge Energy Todat (low)
+            "Eac_dischrtotalH": float(result[66]) / 10,  # 0.1kWh,   AC discharge Energy Total (high)
+            "Eac_dischrtotalL": float(result[67]) / 10,  # 0.1kWh,   AC discharge Energy Total (low)
+            "Acchrcurr": float(result[68]) / 10,         # 0.1A,     AC Charge Battery Current
+            "AC_dischrwattH": float(result[69]) / 10,    # 0.1W,     AC discharge watt (high)
+            "AC_dischrwattL": float(result[70]) / 10,    # 0.1W,     AC discharge watt (low)
+            "AC_dischrvaH": float(result[71]) / 10,      # 0.1VA     AC discharge va (high)
+            "AC_dischrvaL": float(result[72]) / 10,      # 0.1VA     AC discharge va (low)
+            "Bat_dischrwattH": float(result[73]) / 10,   # 0.1W      Bat discharge watts (high)
+            "Bat_dischrwattL": float(result[74]) / 10,   # 0.1W      Bat discharge watts (low)
+            "Bat_dischrvaH": float(result[75]) / 10,     # 0.1VA     Bat discharge va (high)
+            "Bat_dischrvaL": float(result[76]) / 10,     # 0.1VA     Bat discharge va (low)
+            "Bat_wattH": float(result[77]) / 10,         # 0.1W      Signed int positive discharge, negative battery charge power
+            "Bat_wattL": float(result[78]) / 10,         # 0.1W      Signed int positive discharge, negative battery charge power
+            "Batovercharge": float(result[80]),          # 0 no, 1 yes
+            "Mpptfanspeed": float(result[81]),           # 1%        Fan speed of MPPT Charger
+            "Invfanspeed": float(result[82]),            # 1%        Fan speed of Inverter
+        }
+        if gwinfodump: print(info)
+        return info
+
+    def renderStatus(self):
+        data     = self.readStatus()
+        battery  = {}
+        battery['state_of_charge'] = data['BatterySOC']
+        battery['voltage']         = data['Bat_Volt']
+        H = data['Bat_wattH']
+        L = data['Bat_wattL']
+        D = data['Bat_dischrwattL']
+        if H == 6553.5 or D == 0:
+            if L > 0: P = L - 6553.5
+            else: P = 0
+        else:
+            if D != L:
+                print('Bat_wattL should be equal to Bat_dischrwattL but is not!')
+            P = L
+        if -5000 < P and P < 5000: battery['power'] = P
+        else: print('battery power seems abberant: {}'.format(P))
+        if battery['power'] < 0: 
+            battery['power_charge'] = -1 * battery['power']
+            battery['power_discharge'] = 0.0
+        else: 
+            battery['power_charge'] = 0.0
+            battery['power_discharge'] = battery['power']
+        battery['energy_discharge']   = data['Ebat_chrtotalL']
+        battery['energy_discharge_today'] = data['Ebat_chrtodayL']
+        inverter = {}
+        inverter['bus_voltage']    = data['BusVolt']
+        load     = {}
+        load['voltage']            = data['OutputVolt']
+        load['frequency']          = data['OutputFreq']
+        load['load']               = data['LoadPercent']
+        load['current']            = data['OP_Curr']
+        load['active_power']       = data['OP_WattL']
+        load['apparent_power']     = data['OP_VAL']
+        solar    = {}
+        solar['power']             = data['Ppv1L']
+        solar['voltage']           = data['Vpv1']
+        solar['energy']            = data['Epv1_totalL']
+        solar['energy_today']      = data['Epv1_todayL']
+        utility  = {}
+        utility['voltage']         = data['GridVolt']
+        utility['current']         = data['Acchrcurr']
+        utility['power']           = data['AC_InWattL']
+        utility['energy']          = data['Eac_chrtotalL']
+        utility['energy_today']    = data['Eac_chrtodayL']
+        info = {}
+        info['battery'] = battery
+        info['load'] = load
+        info['inverter'] = inverter
+        info['solar'] = solar
+        info['utility'] = utility
+        if gwinfodump: print(info)
+        return info
+
+
+
+#auth = { 'username': 'emonpi', 'password':'emonpimqtt2016' }
+
+def main():
+    """main"""
+    if verbose: logger = modbus_tk.utils.create_logger("console")
+
+    try:
+        #Connect to the slave
+        master = modbus_rtu.RtuMaster(
+            serial.Serial(port=inverterusbport1, baudrate=9600, bytesize=8, parity='N', stopbits=1, xonxoff=0)
+        )
+        master.set_timeout(5.0)
+        master.set_verbose(True)
+        if verbose:
+            logger.info("connected")
+        else:
+            print("connected")
+
+        growatt = Growatt(master,name,unit)
+
+        #result = master.execute(1, cst.READ_INPUT_REGISTERS, 0, 83)
+        #logger.info(result[0])
+        #logger.info(master.execute(1, cst.READ_INPUT_REGISTERS, 0, 83))
+
+        #send some queries
+        #logger.info(master.execute(1, cst.READ_COILS, 0, 10))
+        #logger.info(master.execute(1, cst.READ_DISCRETE_INPUTS, 0, 8))
+        #logger.info(master.execute(1, cst.READ_INPUT_REGISTERS, 100, 3))
+        #logger.info(master.execute(1, cst.READ_HOLDING_REGISTERS, 100, 12))
+        #logger.info(master.execute(1, cst.WRITE_SINGLE_COIL, 7, output_value=1))
+        #logger.info(master.execute(1, cst.WRITE_SINGLE_REGISTER, 100, output_value=54))
+        #logger.info(master.execute(1, cst.WRITE_MULTIPLE_COILS, 0, output_value=[1, 1, 0, 1, 1, 0, 1, 1]))
+        #logger.info(master.execute(1, cst.WRITE_MULTIPLE_REGISTERS, 100, output_value=xrange(12)))
+
+    except modbus_tk.modbus.ModbusError as exc:
+        if verbose: 
+            logger.error("%s- Code=%d", exc, exc.get_exception_code())
+        else:
+            print("%s- Code=%d", exc, exc.get_exception_code())
+
+    while True:
+        # Collect Inverter Status data and publish
+        try:
+            now = time.time()
+            data = growatt.renderStatus()
+            if data is None:
+                print('We sould have data here!')
+                continue
+            msgs = []
+            for key1, item in data.items():
+                for key2, value in item.items():
+                    topic = '{}/{}/{}'.format(MQTT_TOPIC, key1, key2)
+                    msg = {'topic': topic, 'payload': '{};{}'.format(int(now), value)}
+                    msgs.append(msg)
+                    if verbose: logger.info(msg)
+            print('Let publist {} msgs'.format(len(msgs)))
+            #publish.multiple(msgs, hostname='localhost', auth=auth)
+            publish.multiple(msgs, hostname='localhost')
+    
+        except Exception as err:
+            if verbose: print("ERRORHERE1")
+            print(err)
+    
+        time.sleep(interval)
+
+if __name__ == "__main__":
+    main()
