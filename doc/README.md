@@ -30,25 +30,3 @@ Later on, I will try on Raspberry Pi and other ARM boards I have at the lab (the
 
 I would love to add prediction capabilities based on forecasts, previous readings adapted to weather conditions and time of year...
 
-# Hardware
-
-Inventory:
-- EmonPi (Raspberry Pi 3 + RF + WiFi + ehernet + USB)
-- EmonTh (arduino + RF)
-- EmonTx x4 (arduino + RF)
-- Davis weather station (ethernet)
-- Inverter WKS (USB)
-- MQTT relay (WiFi)
-- Toon (WiFi)
-- zigbee USB
-- zigbee smart plugs
-- one-wire USB
-- RS485 USB
-- x86_64: 2GB ram; 32GB HDD; 2x eth; WiFi; 4G; 2x USB; 2x RS485; 2x DIO; rail DIN
-- Raspberry Pi 3
-- Solar Pannels
-- Battery 48V
-- Wind Turbine + inverter
-
-# Home Automation - Domotique
-
