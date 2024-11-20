@@ -12,7 +12,7 @@ subscribre to MQTT sensor topics, do stuff, and publish to MQTT timeserie topics
 
 # mqtt2zigbee
 
-gateway exposing a Zigbee network as MQTT publishers and subscribers.
+emmitter of switch payload to zigbee power plug.
 
 # solarcast2influxdb
 
@@ -20,4 +20,4 @@ filter to format pulled previsions from Solarcast and inject in influxDB timeser
 
 # z2m2mqtt
 
-filter to format all MQTT payloads emitted from and to zigbee2mqtt as sensors MQTT topics.
+filter to format all MQTT payloads emitted from zigbee2mqtt as sensors MQTT topics.
