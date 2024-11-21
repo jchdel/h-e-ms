@@ -27,6 +27,7 @@ import syslog
 processes = {}
 taskList = {}
 #task = {'function':<function_name>, 'params': <dict_args>}
+heaterList = []
 
 #######################################################################
 
@@ -287,13 +288,222 @@ def energy_to_power(timestamp, value, dict_args):
     return value
 #processes['energy_to_power'] = energy_to_power
 
-def publish_to_mqtt(timestamp, value, dict_args):
-    topic = dict_args['topic']
-    payload = '{};{}'.format(timestamp, value)
-    msg = {'topic': topic, 'payload': payload}
-    publish.multiple([msg])
+def allocate_extra_power(timestamp, value, dict_args):
+    power = float(value)
+    if power > 0: # battery is discharging
+        # no extra power to allocate. Do we need to stop some load?
+        soc = int(get_value_from_redis('battery/state_of_charge'))
+        if soc < 50:
+            # stop free load(s)
+            None
+        else:
+            None
     return value
-processes['publish_to_mqtt'] = publish_to_mqtt
+#processes['allocate_extra_power'] = allocate_extra_power
+
+def display_soc(timestamp, value, dict_args):
+    soc = float(value)
+    device = dict_args['topic']
+    color = 'red'
+    if soc > 50.0: 
+        color = 'orange'
+    if soc > 60.0: 
+        color = 'yellow'
+    if soc > 70.0: 
+        color = 'green'
+    if soc > 80.0: 
+        color = 'blue'
+    if soc > 90.0: 
+        color = 'indigo'
+    set_color(color, device)
+    return value
+processes['display_soc'] = display_soc
+
+def need_utility(timestamp, value, dict_args):
+    soc = float(value)
+    utility = dict_args['topic']
+    if soc < 50.0: 
+        turn_on(utility)
+        blink('lampe-temoin')
+    #if soc > 98.0: 
+    #    turn_off(utility)
+    #    blink('lampe-temoin')
+    return value
+processes['need_utility'] = need_utility
+
+def thermostat(timestamp, value, dict_args):
+    heater          = dict_args['topic']
+    temperature     = float(value)
+    comfort         = float(dict_args['comfort'])
+    try:     forced = in_between(dict_args['forced'])
+    except:  forced = False
+    if forced: 
+        syslog.syslog('No comfort reduction for {} because {}'.format(heater,dict_args['forced']))
+    else: 
+        comfort = 17.0
+        syslog.syslog('Reducing comfort to {} for {}'.format(comfort, heater))
+    # do we need to heat the room?
+    if temperature > comfort:
+        syslog.syslog('{} is warm enough'.format(heater))
+        turn_off(heater)
+        return value
+    # what about available power?
+    ir_power        = float(dict_args['ir_power'])
+    available_power = available_heating_power() # - used_heating_power()
+    # do not count heater twice
+    try: available_power += float(get_value_from_redis("{}/power".format(heater)))
+    except: 
+        syslog.syslog('I guess {} has no associated heater!?'.format(heater))
+        return value
+    syslog.syslog('Heating ({}): available: {}W; needed:{}W; T: {}°C; consigne: {}°C'.format(heater, available_power, ir_power, temperature, comfort))
+    # do we have enough power to turn on this heater?
+    if ir_power < available_power: 
+        turn_on(heater)
+    else: 
+        turn_off(heater)
+    return value
+processes['thermostat'] = thermostat
+
+def click(timestamp, value, dict_args):
+    # value may be either "single" or "double"
+    syslog.syslog('Button: {}'.format(value))
+    return value
+processes['click'] = click
+
+def click_thermostat(timestamp, value, dict_args):
+    topic = '{}-thermo/temperature'.format(dict_args['topic'])
+    single = float(dict_args['single'])
+    double = float(dict_args['double'])
+    if value == 'single': 
+        comfort = single
+    if value == 'double': 
+        comfort = double
+    for task in taskList[topic]:
+        if task['name'] != 'thermostat': 
+            continue 
+        params = task['params']
+        params['comfort'] = comfort
+        syslog.syslog('Set comfort to {}°C for {}'.format(comfort, dict_args['topic']))
+    return value
+processes['click_thermostat'] = click_thermostat
+
+#######################################################################
+
+# from https://stackoverflow.com/questions/28526012/python-time-range-validator/28553237#28553237
+def in_between(time_range):
+    now = datetime.now().time()
+    start, end = [datetime.strptime(s, "%H:%M").time()
+                  for s in time_range.split("-")]
+    if start < end: # e.g. "07:00-23:00"
+        return start <= now < end
+    elif end < start: # e.g. "23:00-07:00"
+        return start <= now or now < end
+    else: # start == end
+        return True # consider it 24h interval
+
+def is_morning(): # time is UTC
+    return in_between("04:00-09:00")
+
+def is_evening(): # time is UTC
+    return in_between("15:30-21:00")
+
+def is_night(): # time is UTC
+    return in_between("21:00-04:00")
+
+def is_day(): # time is UTC
+    return in_between("09:00-15:30")
+
+def set_color(color, device):
+    payload = '{"color":{"x":0.3497,"y":0.3533}}' # color = 'white'
+    if color == 'indigo': payload = '{"color":{"x":0.4066,"y":0.1643}}'
+    if color == 'blue':   payload = '{"color":{"x":0.1355,"y":0.0399}}'
+    if color == 'green':  payload = '{"color":{"x":0.1704,"y":0.7090}}'
+    if color == 'yellow': payload = '{"color":{"x":0.4339,"y":0.5008}}'
+    if color == 'orange': payload = '{"color":{"x":0.6211,"y":0.3667}}'
+    if color == 'red':    payload = '{"color":{"x":0.6942,"y":0.2963}}'
+    publish_to_zigbee(payload, device)
+    syslog.syslog("Set color {} for {}".format(color, device))
+
+def turn_on(device):
+    payload = '{"state":"ON"}'
+    publish_to_zigbee(payload, device)
+    syslog.syslog("Set ON for {}".format(device))
+
+def turn_off(device):
+    payload = '{"state":"OFF"}'
+    publish_to_zigbee(payload, device)
+    syslog.syslog("Set OFF for {}".format(device))
+
+def blink(device):
+    payload = '{"effect":"blink"}'
+    publish_to_zigbee(payload, device)
+    syslog.syslog("Set blink for {}".format(device))
+
+def available_heating_power():
+    # some data used to make the decision
+    soc       = float(get_value_from_redis("battery/state_of_charge"))
+    inverter  = float(get_value_from_redis("utility/voltage"))
+    utility   = float(get_value_from_redis("edf/voltage"))
+    vaisselle = float(get_value_from_redis("lave-vaisselle/power"))
+    linge     = float(get_value_from_redis("lave-linge/power"))
+    current   = float(get_value_from_redis("edf/current"))
+    home      = float(get_value_from_redis("load/active_power"))
+    # let's adjust available power depending on the context
+    power     = float(get_value_from_redis("solar/power"))
+    if current > 1.0: # utility is connected to inverter
+        # we want to (soft) limit utility current to 10A
+        power = float((10.0 - current) * utility)
+        if current > 10.2: # we want to (hard) limit utility current to 10A
+            power = 0.0
+            blink('lampe-temoin')
+            syslog.syslog('Too much current currently pumped ({}A)'.format(current))
+    elif utility > 1.0: # utility is present but not used
+        # limit to two heaters
+        power = 1750.0 - used_heating_power()
+        # do not draw too much power
+        if home > 2000.0: 
+            power = 0.0
+            blink('lampe-temoin')
+            syslog.syslog('Enough load already ({}W)'.format(home))
+        # Do not heat at all if battery low!
+        if soc < 50.0: 
+            power = 0.0
+            blink('lampe-temoin')
+            syslog.syslog('Battery level too low ({}%)'.format(soc))
+    else: # we run solely on battery
+        # we allow 10W for each % of state_of_charge
+        power += float(10.0 * soc)
+        # Do not heat at all if battery low!
+        if soc < 50.0: 
+            power = 0.0
+            blink('lampe-temoin')
+            syslog.syslog('Battery level too low ({}%)'.format(soc))
+    # we share power with other machines...
+    power -= vaisselle
+    power -= linge
+    #syslog.syslog('Available heating power is {} Watt'.format(power))
+    return power
+
+def used_heating_power():
+    heating = float(get_value_from_redis("chevet/power"))
+    for heater in heaterList:
+        try: heating += float(get_value_from_redis("{}/power".format(heater)))
+        except: pass
+    syslog.syslog('Used heating power is {} Watt'.format(heating))
+    return heating
+
+def find_heaters():
+    list = []
+    for k, v in taskList.items():
+        for task in v:
+            if task['name'] == 'thermostat':
+                thermo = k.split('/')[0].split('-')[0]
+                device = task['params']['topic']
+                syslog.syslog('found heater {} from thermo {}'.format(device, thermo))
+                list.append(device)
+    return list
+
+#######################################################################
 
 def publish_to_sensors(timestamp, value, dict_args):
     topic = 'sensors/{}'.format(dict_args['topic'])
@@ -309,22 +519,19 @@ def publish_to_timeserie(timestamp, value, dict_args):
     return value
 processes['publish_to_timeserie'] = publish_to_timeserie
 
-def allocate_extra_power(timestamp, value, dict_args):
-    power = float(value)
-    if power > 0: # battery is discharging
-        # no extra power to allocate. Do we need to stop some load?
-        soc = int(get_value_from_redis('battery/state_of_charge'))
-        if soc < 50:
-            # stop free load(s)
-            None
-            topic   = 'zigbee2mqtt/{}/set_payload'.format(load_name)
-            payload = '{"state":"{}"}'.format('OFF')
-        else:
-            None
+def publish_to_mqtt(timestamp, value, dict_args):
+    topic = dict_args['topic']
+    payload = '{};{}'.format(timestamp, value)
+    msg = {'topic': topic, 'payload': payload}
+    publish.multiple([msg])
     return value
-processes['allocate_extra_power'] = allocate_extra_power
+#processes['publish_to_mqtt'] = publish_to_mqtt
 
-#######################################################################
+def publish_to_zigbee(payload, device):
+    topic   = 'zigbee2mqtt/{}/set_payload'.format(device)
+    msg = {'topic': topic, 'payload': payload}
+    #syslog.syslog("Publish to zigbee: '{}' ; '{}'".format(topic, payload))
+    publish.multiple([msg])
 
 def publish_to_cache(timestamp, value, dict_args):
     topic = dict_args['topic']
@@ -335,6 +542,8 @@ def publish_to_cache(timestamp, value, dict_args):
     redis_client.set(topic, payload)
     return value
 processes['publish_to_cache'] = publish_to_cache
+
+#######################################################################
 
 def get_from_redis(topic):
     # fetch from redis
@@ -369,7 +578,8 @@ def register(topic, taskname, params):
         taskList[topic] = []
         #taskList[topic].append({'name': 'publish_to_cache', 'function': publish_to_cache, 'params': {'topic': topic}})
     taskList[topic].append({'name': taskname, 'function': processes[taskname], 'params': params})
-    syslog.syslog('TASK {} registered FOR TOPIC {}'.format(taskname, topic))
+    if not taskname == 'noop':
+        syslog.syslog('TASK {} registered FOR TOPIC {}'.format(taskname, topic))
 
 #######################################################################
 
@@ -393,7 +603,7 @@ def apply_filter(topic, payload):
             value = task['function'](timestamp, value, task['params'])
             #print('after',task['name'],':',value)
         except:
-            syslog.syslog('error in TASK {}'.format(task['name']))
+            syslog.syslog('ERROR in TASK {} with value {} and params {}'.format(task['name'], value, task['params']))
             break
     redis_client.delete('{}/original'.format(topic))
     redis_client.delete('{}/original/previous'.format(topic))
@@ -401,27 +611,23 @@ def apply_filter(topic, payload):
 
 #######################################################################
 
-print('#######################################################################')
-print('Available process blocks:')
-print(processes.keys())
-print('#######################################################################')
+syslog.syslog('Available process blocks:')
+syslog.syslog('{}'.format(processes.keys()))
 
 #######################################################################
 
 def on_mqtt_connect(client, userdata, flags, rc):
     if rc == 0:
         syslog.syslog("Connected to MQTT Broker!")
-        print('#######################################################################')
-        print('############### looping, waiting for MQTT messages... #################')
-        print('#######################################################################')
     else:
-        syslog.syslog("Failed to connect, return code %d\n", rc)
+        syslog.syslog("Failed to connect, return code %d. Aborting!", rc)
         exit
 
 def on_mqtt_message(client, userdata, msg):
     t_prefix = str(msg.topic).split('/')[0]
     t_device = str(msg.topic).split('/')[1]
     t_type   = str(msg.topic).split('/')[2]
+    # remove the prefix
     topic    = '{}/{}'.format(t_device, t_type)
     # msg.payload is a b_str
     payload  = msg.payload.decode('ASCII') 
@@ -436,6 +642,7 @@ def read_config(config_file):
         confreader = csv.DictReader(csvfile, fieldnames=fieldnames)
         for raw in confreader:
             topic=raw['topic']
+            if topic[0] == '#': continue
             taskname=raw['taskname']
             params={}
             for arg in str(raw['params']).split(';'):
@@ -452,8 +659,9 @@ def read_config(config_file):
 try: 
     config_file = '/usr/local/etc/hems.processes.csv'
     read_config(config_file)
+    heaterList = find_heaters()
 except: 
-    syslog.syslog('failed to read config file {}'.format(config_file))
+    syslog.syslog('failed to read config file {}. Aborting!'.format(config_file))
     exit
 mqtt_client = mqtt.Client()
 mqtt_client.username_pw_set('emonpi', 'emonpimqtt2016')
@@ -472,6 +680,8 @@ try:
     #    redis_client.delete(key)
     #    print(key, 'deleted')
 except: 
+    syslog.syslog('Failed to connect to Redis cache. Aborting!')
     exit
 
+syslog.syslog('Looping, waiting for MQTT messages...')
 mqtt_client.loop_forever()
