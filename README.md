@@ -21,3 +21,26 @@ Different agents can read from the key/value store.
 Agents enforcre automations.
 
 Dashboards are build from the timeserie database.
+
+Everything is self hosted! Nothing goes to the cloud!
+
+## Current automations
+
+- wheather station integration (Davis Vantage Pro)
+- night only: some power plugs are deactivated while photo-voltaic is producing (reverse could be true)
+- feedback light bulb: a light bulb changes color according to the battery state-of-charge
+- thermostats: infra-red heaters are driven according to room temperature, specification and available energy
+- generator/utility start request: when battery state-of-charge is too low
+- power and energy consumption and production analysis (utility, solar, battery, load)
+- manage solar forecast (subscription to external service)
+
+### Planned automations
+
+- garden monitoring
+- garden watering
+- motion/presence detection for scene activation
+- garden lightning
+- water monitoring (drinkable and rain captation)
+- air quality monitoring
+
+mostly waiting for the gadgets...
