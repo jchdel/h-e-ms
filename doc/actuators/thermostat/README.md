@@ -1,7 +1,11 @@
-In the old farm I rent, the physical thermostat is located above the oven...
+Heating is mostly provided by (long) infra-red panels driven by a zigbee smart plug.
 
-I have a rooted Toon running in the kitchen and 4 EmonTh scattered accros the home. All sending their temperature measurements to EmonHub.
+A room with such heater also has a zigbee temperature and humidity sensor.
 
-A GNU/Linux cronjob fetch values from EmonCMS (API) and follows a decision tree to activate, or deactivate or let in current state, the furnace regarding of the legacy thermostat forced in full heating mode. The cronjob in running on the EmonPi monitoring the home.
+An hard limit is enforced for current used for heating.
 
-The furnace electric power supply is driven by an EmonWifiMqttRelay.
+Every time a temperature is published, an agent checks if room temperature is below configured threshold and if there is available power in the heating pool and drives related heater accordingly.
+
+One helper function computes availaible power.
+
+Each room can be configured to have time ranges of higher temperature needs.
