@@ -1,3 +1,5 @@
+# Software Bill Of Materials
+
 In order to run our YAH solution, we are using:
 
 - Operating Sysyem: Alpine Linux
@@ -13,10 +15,10 @@ In order to run our YAH solution, we are using:
 - agents:
     - z2m2mqtt: format zigbee2mqtt outputs
     - 1-wire2mqtt: poll devices and publish values
-    - growatt2mqtt: poll device and publush values
+    - growatt2mqtt: poll device and publish values
     - weewx2mqtt: module to export directly to MQTT
     - mqtt2mqtt: filter, compute, aggregate, select and publish
     - mqtt2influxdb: inject values in timeseries
     - solarcast2influxdb: inject forecast values in timeserie
 
-Other subsysteasm are not deployed especially for YAH.
+Other subsystems are not deployed especially for YAH.
