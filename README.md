@@ -8,14 +8,10 @@ Alpine Linux, a couple of packages, Python and Bash...
 
 ## Architecture
 
-Zigbee sensors and actuators are exposed as MQTT topics by zigbee2mqtt.
+For every supported protocol, sensors and actuators are exposed as MQTT topics by specific daemon.
 
-Other devices are connected via USB, ethernet, 1-Wire, Wi-Fi, Bluetooth and RF. For each a daemon makes the bridge to MQTT.
-
-Agents are listening to specific MQTT topics and take action upon receiving messages. 
-
-Agents feed a key/value store and a timeserie database with collected values. They also publish MQTT messages.
-
+Agents are listening to specific MQTT topics and take action upon receiving messages. \
+Agents feed a key/value store and a timeserie database with collected values. They also publish MQTT messages. \
 Different agents can read from the key/value store.
 
 Agents enforcre automations.
@@ -23,6 +19,15 @@ Agents enforcre automations.
 Dashboards are build from the timeserie database.
 
 Everything is self hosted! Nothing goes to the cloud!
+
+### Supported protocols
+
+- 1-wire
+- Radio Frequency
+- Wi-Fi + HTTP
+- Modbus (USB)
+- Modbus (ethernet)
+- Zigbee
 
 ## Current automations
 
