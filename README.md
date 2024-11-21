@@ -8,9 +8,9 @@ Alpine Linux, a couple of packages, Python and Bash...
 
 ## Architecture
 
-Sensors and actuators are exposed as MQTT topics.
+Zigbee sensors and actuators are exposed as MQTT topics by zigbee2mqtt.
 
-Daemons expose collected values as sensors.
+Other devices are connected via USB, ethernet, 1-Wire, Wi-Fi, Bluetooth and RF. For each a daemon makes the bridge to MQTT.
 
 Agents are listening to specific MQTT topics and take action upon receiving messages. 
 
