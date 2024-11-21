@@ -1,8 +1,0 @@
-#!/bin/sh
-TEMP=$(curl -Nks "http://toon/happ_thermstat?action=getThermostatInfo" \
-  | sed -e 's/.*"currentTemp":"\([0-9]*\)".*/\1/' \
-        -e 's/\([0-9][0-9]\)\([0-9][0-9]\)/\1.\2/' \
-)
-curl -s \
-  --data "node=toon&data={temperature:$TEMP}&apikey=******" \
-  http://emonpi.local/input/post >/dev/null
