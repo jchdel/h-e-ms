@@ -1,0 +1,2 @@
+#TOPIC_to_publish_to,FILE_to_read
+sensors/atelier/temperature,/srv/1wire/10.E9490C000000/temperature
