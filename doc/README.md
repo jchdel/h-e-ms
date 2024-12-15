@@ -12,3 +12,7 @@ Later on, I will try on Raspberry Pi and other ARM boards I have at the lab (the
 
 I would love to add prediction capabilities based on forecasts, previous readings adapted to weather conditions and time of year...
 
+## Architecture
+
+![software components](Diagram.png "architecture")
+
