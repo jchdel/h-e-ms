@@ -1,4 +1,5 @@
 #!/bin/bash
+# WE USE BASHIMS
 ##########################################
 # MQTT Shell Listen & inject to MQTT     #
 ##########################################
@@ -26,8 +27,9 @@ listen(){
 	while read line 
 	do
 		[ -z $DEBUG ] || echo "MQTT: $line"
+		logger -t $ME "MQTT: $line"
 		# get the timestamp ASAP
-		timestamp=$(date +%s)
+		timestamp=$EPOCHSECONDS # bash v5.0+
 		IFS=' '
 		read -ra r <<< "$line"
 		# extract zigbee devive friendly  name from topic
@@ -41,14 +43,16 @@ listen(){
 		[ ${#t[@]} -eq 2 ] || continue
 		id=${t[1]}
 		# filter message to remove unwanted information
-		message=$(echo "$message" | jq -c -M 'del(.update)|del(.child_lock)|del(.indicator_mode)|del(.power_outage_memory)|del(.state)|del(.update_available)')
+		message=$(echo "$message" | jq -c -M 'del(.update)|del(.child_lock)|del(.indicator_mode)|del(.power_outage_memory)|del(.update_available)')
 		echo "$message" | jq -c -M -r '.| keys_unsorted[]' |
 		while IFS= read -r key
 		do
 			value=$(echo "$message" | jq -c -M -r ".$key")
 			# publish to local sensors collection infra (will be forwarded by mosquitto to upstream)
 			echo "$timestamp;$value" | mosquitto_pub -l $AUTH -t $MQTT_TOPIC_OUT/$id/$key
-			[ $? -ne 0 ] && echo "Failed to publish $value to topic=$MQTT_TOPIC_OUT/$id/$key"
+			[ $? -ne 0 ] && \
+				logger -t $ME "Failed to publish $value to topic=$MQTT_TOPIC_OUT/$id/$key" \
+				|| logger -t $ME "Publish $value to topic=$MQTT_TOPIC_OUT/$id/$key" 
 		done 
 		
 	done

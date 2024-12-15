@@ -65,7 +65,7 @@ listen(){
 		# test if array has 2 members
 		[ ${#m[@]} -eq 2 ] || continue
 		# TODO develop following filter...
-		# whatif if singe value or key=value batch
+		# whatif if single value or key=value batch
 		# test if '=' is present in the string?
 		[ 0 ] && value="${va}=${m[1]}" || value="${m[1]}"
 		timestamp=${m[0]}
@@ -77,7 +77,7 @@ listen(){
 	done
 	IFS=$oIFS
 }
-##########################################
+############################################
 #influx -execute "CREATE DATABASE $DATABASE"
 trap ctrl_c INT
 [ -z "$DEBUG" ] || echo "Listening to $MQTT_TOPIC"
